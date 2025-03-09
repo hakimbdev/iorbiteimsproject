@@ -1,0 +1,89 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isUserOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isCompanyMember(companyId) {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId == companyId;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+    }
+
+    function isSubscriptionActive(companyId) {
+      return exists(/databases/$(database)/documents/subscriptions/$(companyId)) &&
+        get(/databases/$(database)/documents/subscriptions/$(companyId)).data.status == 'active';
+    }
+
+    // Companies collection
+    match /companies/{companyId} {
+      allow read: if isCompanyMember(companyId);
+      allow create: if true;
+      allow update, delete: if isCompanyMember(companyId) && hasRole('admin');
+    }
+
+    // Properties collection
+    match /properties/{propertyId} {
+      allow read: if isCompanyMember(resource.data.companyId);
+      allow create: if isCompanyMember(request.resource.data.companyId);
+      allow update, delete: if isCompanyMember(resource.data.companyId);
+    }
+
+    // Clients collection
+    match /clients/{clientId} {
+      allow read: if isCompanyMember(resource.data.companyId);
+      allow create: if isCompanyMember(request.resource.data.companyId);
+      allow update, delete: if isCompanyMember(resource.data.companyId);
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isUserOwner(userId) || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId == 
+        get(/databases/$(database)/documents/users/$(userId)).data.companyId));
+      allow create: if true;
+      allow update: if isUserOwner(userId);
+      allow delete: if false;
+    }
+
+    // Subscriptions collection
+    match /subscriptions/{subscriptionId} {
+      allow read: if isAuthenticated() && isCompanyMember(subscriptionId);
+      allow create: if true;
+      allow update, delete: if false;
+    }
+
+    // Roles collection
+    match /roles/{roleId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && hasRole('admin');
+    }
+
+    // Activity collection
+    match /activity/{activityId} {
+      allow read: if isUserOwner(resource.data.userId);
+      allow create: if true;
+      allow update, delete: if false;
+    }
+
+    // Login attempts collection
+    match /login_attempts/{attemptId} {
+      allow read: if isUserOwner(resource.data.userId);
+      allow create: if true;
+      allow update, delete: if false;
+    }
+  }
+} 
